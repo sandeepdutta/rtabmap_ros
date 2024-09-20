@@ -2317,7 +2317,7 @@ void CoreWrapper::process(
 		{
 			timeRtabmap = timer.ticks();
 		}
-		RCLCPP_INFO(this->get_logger(), "rtabmap (%d): Rate=%.2fs, Limit=%.3fs, Conversion=%.4fs, RTAB-Map=%.4fs, Maps update=%.4fs pub=%.4fs (local map=%d, WM=%d)",
+		RCLCPP_INFO(this->get_logger(), "rtabmap (%d): Rate=%.2fs, Limit=%.3fs, Conversion=%.4fs, RTAB-Map=%.4fs, Maps update=%.4fs pub=%.4fs delay=%.4fs (local map=%d, WM=%d)",
 				rtabmap_.getLastLocationId(),
 				rate_>0?1.0f/rate_:0,
 				rtabmap_.getTimeThreshold()/1000.0f,
@@ -2325,6 +2325,7 @@ void CoreWrapper::process(
 				timeRtabmap,
 				timeUpdateMaps,
 				timePublishMaps,
+				(now() - lastPoseStamp_).seconds(),
 				(int)rtabmap_.getLocalOptimizedPoses().size(),
 				rtabmap_.getWMSize()+rtabmap_.getSTMSize());
 		rtabmapROSStats_.insert(std::make_pair(std::string("RtabmapROS/HasSubscribers/"), mapsManager_.hasSubscribers()?1:0));
@@ -4436,7 +4437,7 @@ void CoreWrapper::goalResponseCallback(
 {
         auto goal_handle = future.get();
 #else
-               const GoalHandleNav2::SharedPtr & goal_handle)
+        const GoalHandleNav2::SharedPtr & goal_handle)
 {
 #endif
 	if (!goal_handle) {
@@ -4448,6 +4449,7 @@ void CoreWrapper::goalResponseCallback(
 		latestNodeWasReached_ = false;
 	} else {
 		RCLCPP_INFO(this->get_logger(), "Goal accepted by server, waiting for result");
+		lastGoalSent_ = goal_handle->get_goal_id();
 	}
 }
 
@@ -4472,6 +4474,11 @@ void CoreWrapper::resultCallback(
 			{
 				RCLCPP_INFO(this->get_logger(), "Planning: nav2 success!");
 			}
+		}
+		else if(result.code==rclcpp_action::ResultCode::ABORTED && result.goal_id != lastGoalSent_)
+		{
+			// Just ignored, it is from an old goal
+			ignore = true;
 		}
 		else
 		{
