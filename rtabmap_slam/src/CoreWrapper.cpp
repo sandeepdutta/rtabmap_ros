@@ -2167,7 +2167,8 @@ void CoreWrapper::process(
 		imuMutex_.lock();
 		if(!imus_.empty())
 		{
-			Transform t = Transform::getTransform(imus_, data.stamp());
+			double sDiff;
+			Transform t = Transform::getClosestTransform(imus_,data.stamp(),&sDiff);
 			if(!t.isNull())
 			{
 				imuMutex_.unlock();
@@ -2175,7 +2176,7 @@ void CoreWrapper::process(
 				rtabmap::Transform localTransform;
 				if(frameId_.compare(imuFrameId_) != 0)
 				{
-					localTransform = rtabmap_conversions::getTransform(frameId_, imuFrameId_, rtabmap_conversions::timestampToROS(data.stamp()), *tfBuffer_, waitForTransform_);
+					localTransform = rtabmap_conversions::getTransform(frameId_, imuFrameId_, rtabmap_conversions::timestampToROS(0.0), *tfBuffer_, waitForTransform_);
 				}
 				else
 				{
@@ -2651,7 +2652,7 @@ void CoreWrapper::tagDetectionsAsyncCallback(const apriltag_msgs::msg::AprilTagD
 			if(camToTag.isNull())
 			{
 				RCLCPP_WARN(get_logger(), "Could not get TF between %s and %s frames for tag detection %d.",
-					frameId_.c_str(),
+					tagDetections->header.frame_id.c_str(),
 					tagFrameId.c_str(),
 					tagDetections->detections[i].id);
 					continue;
