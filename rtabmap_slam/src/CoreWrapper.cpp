@@ -2008,14 +2008,15 @@ void CoreWrapper::process(
 		// IMU
 		if(!imus_.empty())
 		{
-			Transform t = Transform::getTransform(imus_, data.stamp());
+			double sDiff;
+			Transform t = Transform::getClosestTransform(imus_,data.stamp(),&sDiff);
 			if(!t.isNull())
 			{
 				// get local transform
 				rtabmap::Transform localTransform;
 				if(frameId_.compare(imuFrameId_) != 0)
 				{
-					localTransform = rtabmap_conversions::getTransform(frameId_, imuFrameId_, rtabmap_conversions::timestampToROS(data.stamp()), *tfBuffer_, waitForTransform_);
+					localTransform = rtabmap_conversions::getTransform(frameId_, imuFrameId_, rtabmap_conversions::timestampToROS(0.0), *tfBuffer_, waitForTransform_);
 				}
 				else
 				{
@@ -2034,8 +2035,8 @@ void CoreWrapper::process(
 			else
 			{
 				RCLCPP_WARN(this->get_logger(), "We are receiving imu data (buffer=%d), but cannot interpolate "
-						"imu transform at time %f. IMU won't be added to graph.",
-						(int)imus_.size(), data.stamp());
+						"imu transform at time %f. IMU won't be added to graph. %f",
+						(int)imus_.size(), data.stamp(),waitForTransform_);
 			}
 		}
 
@@ -2469,7 +2470,7 @@ void CoreWrapper::tagDetectionsAsyncCallback(const apriltag_msgs::msg::AprilTagD
 			if(camToTag.isNull())
 			{
 				RCLCPP_WARN(get_logger(), "Could not get TF between %s and %s frames for tag detection %d.",
-					frameId_.c_str(),
+					tagDetections->header.frame_id.c_str(),
 					tagFrameId.c_str(),
 					tagDetections->detections[i].id);
 					continue;
