@@ -109,6 +109,7 @@ private:
 
 protected:
 	rclcpp::CallbackGroup::SharedPtr dataCallbackGroup_;
+	void tick(const rclcpp::Time & stamp);
 
 private:
 	rtabmap::Odometry * odometry_;
@@ -161,6 +162,7 @@ private:
 	USemaphore dataReady_;
 	rtabmap::SensorData dataToProcess_;
 	std_msgs::msg::Header dataHeaderToProcess_;
+	bool bufferedDataToProcess_;
 
 	bool paused_;
 	int resetCountdown_;
@@ -178,10 +180,14 @@ private:
 	bool compressionParallelized_;
 	int odomStrategy_;
 	bool waitIMUToinit_;
+	bool alwaysCheckImuTf_;
 	bool imuProcessed_;
-	std::map<double, rtabmap::IMU> imus_;
+	int processedMsgs_;
+	int droppedMsgs_;
+	std::map<double, sensor_msgs::msg::Imu::ConstSharedPtr> imus_;
 	std::string configPath_;
 	rtabmap::Transform initialPose_;
+	rtabmap::Transform imuLocalTransform_;
 
 	rtabmap_util::ULogToRosout ulogToRosout_;
 
@@ -189,11 +195,13 @@ private:
 	{
 	public:
 		OdomStatusTask();
-		void setStatus(bool isLost);
+		void setStatus(bool isLost, int processedMsgs, int droppedMsgs);
 		void run(diagnostic_updater::DiagnosticStatusWrapper &stat);
 	private:
 		bool lost_;
 		bool dataReceived_;
+		int processedMsgs_;
+		int droppedMsgs_;
 	};
 	OdomStatusTask statusDiagnostic_;
 	std::unique_ptr<rtabmap_sync::SyncDiagnostic> syncDiagnostic_;
