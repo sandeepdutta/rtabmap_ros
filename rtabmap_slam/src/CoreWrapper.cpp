@@ -209,6 +209,7 @@ CoreWrapper::CoreWrapper(const rclcpp::NodeOptions & options) :
 		useActionForGoal_ = false;
 	}
 #endif
+	processInThread_ = this->declare_parameter("process_in_thread", processInThread_);
 	useSavedMap_ = this->declare_parameter("use_saved_map", useSavedMap_);
 	genScan_ = this->declare_parameter("gen_scan", genScan_);
 	genScanMaxDepth_ = this->declare_parameter("gen_scan_max_depth", genScanMaxDepth_);
@@ -244,6 +245,7 @@ CoreWrapper::CoreWrapper(const rclcpp::NodeOptions & options) :
 	RCLCPP_INFO(this->get_logger(), "rtabmap: odom_sensor_sync   = %s", odomSensorSync_?"true":"false");
 	RCLCPP_INFO(this->get_logger(), "rtabmap: pub_loc_pose_only_when_localizing = %s", pubLocPoseOnlyWhenLocalizing_?"true":"false");
 	RCLCPP_INFO(this->get_logger(), "rtabmap: wait_for_transform = %f", waitForTransform_);
+	RCLCPP_INFO(this->get_logger(), "rtabmap: process_in_thread = %s", processInThread_?"true":"false");
 	if(this->isSubscribedToStereo())
 	{
 		RCLCPP_INFO(this->get_logger(), "rtabmap: stereo_to_depth = %s", stereoToDepth_?"true":"false");
@@ -274,7 +276,9 @@ CoreWrapper::CoreWrapper(const rclcpp::NodeOptions & options) :
 	processingCallbackGroup_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 	syncTimer_ = this->create_wall_timer(0s, std::bind(&CoreWrapper::processAsync, this), processingCallbackGroup_);  
 	syncTimer_->cancel();
-
+	if (processInThread_) {
+		processAsyncThread_ = new std::thread(&CoreWrapper::processAsyncThread, this);
+	}
 	rclcpp::SubscriptionOptions subOptions;
 	subOptions.callback_group = processingCallbackGroup_;
 
@@ -1318,7 +1322,11 @@ void CoreWrapper::commonMultiCameraCallback(
 				localDescriptors);
 		
 		if(syncData_.valid) {
-			syncTimer_->reset();
+			if (processInThread_) {
+				syncDataBuffer_.produce(syncData_);
+			} else {
+				syncTimer_->reset();
+			}
 		}
 		syncDataMutex_.unlock();
 	}
@@ -1937,6 +1945,26 @@ void CoreWrapper::processAsync()
 		syncData_.valid=false;
 	}
 	syncTimer_->cancel();
+}
+
+void CoreWrapper::processAsyncThread()
+{
+	while (rclcpp::ok())
+	{
+		SyncData syncData;
+		syncDataBuffer_.consume(syncData);
+		if (syncData.valid)
+		{
+			process(syncData.stamp,
+				syncData.data,
+				syncData.odom,
+				syncData.odomVelocity,
+				syncData.odomFrameId,
+				syncData.odomCovariance,
+				syncData.odomInfo,
+				syncData.timeMsgConversion);
+		}
+	}
 }
 
 void CoreWrapper::process(

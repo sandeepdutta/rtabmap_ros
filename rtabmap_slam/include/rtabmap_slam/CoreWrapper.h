@@ -28,6 +28,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef COREWRAPPER_H_
 #define COREWRAPPER_H_
 
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
+#include <atomic>
+
 #include <rtabmap_slam/visibility.h>
 #include <rclcpp/rclcpp.hpp>
 
@@ -103,6 +110,50 @@ class StereoDense;
 }
 
 namespace rtabmap_slam {
+template <typename T>
+class DoubleBuffer {
+private:
+    T buffer[2];  // Two slots for ping-pong buffering
+    std::atomic<int> write_index{0};
+    std::atomic<int> read_index{1};
+
+    std::mutex mtx;
+    std::condition_variable cv;
+    std::atomic<bool> new_data{false};
+
+public:
+    DoubleBuffer() = default;
+
+    // Producer writes a single item to the write buffer
+    void produce(const T& data) {
+        buffer[write_index.load(std::memory_order_acquire)] = data;
+        new_data.store(true, std::memory_order_release);
+        cv.notify_one();
+    }
+
+    // Consumer swaps indexes and reads a single item from the read buffer
+    void consume(T& data) {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [this]() { return new_data.load(std::memory_order_acquire); });
+
+        // Atomic swap of indexes
+        int old_write = write_index.load(std::memory_order_relaxed);
+        int old_read = read_index.load(std::memory_order_relaxed);
+
+        bool swapped = false;
+        while (!swapped) {
+            swapped = read_index.compare_exchange_weak(
+                old_read, old_write,
+                std::memory_order_acq_rel
+            );
+        }
+        write_index.store(old_read, std::memory_order_release);
+
+        // Read from new read buffer
+        data = buffer[read_index.load(std::memory_order_acquire)];
+        new_data.store(false, std::memory_order_release);
+    }
+};
 
 class CoreWrapper : public rclcpp::Node, public rtabmap_sync::CommonDataSubscriber
 {
@@ -201,7 +252,7 @@ private:
 	void updateGoal(const rclcpp::Time & stamp);
 
 	void processAsync();
-
+	void processAsyncThread();
 	void process(
 			const rclcpp::Time & stamp,
 			rtabmap::SensorData & data,
@@ -483,6 +534,10 @@ private:
 	SyncData syncData_;
 	UMutex syncDataMutex_;
 	bool triggerNewMapBeforeNextUpdate_;
+
+	DoubleBuffer<SyncData> syncDataBuffer_;
+	std::thread* processAsyncThread_;
+	bool processInThread_ {false};
 };
 
 }
