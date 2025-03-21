@@ -1947,6 +1947,7 @@ void CoreWrapper::processAsyncThread()
 	{
 		SyncData syncData;
 		syncDataBuffer_.consume(syncData);
+		rtabmapMutex_.lock();
 		if(triggerNewMapBeforeNextUpdate_)
 		{
 			rtabmap_.triggerNewMap();
@@ -1963,6 +1964,7 @@ void CoreWrapper::processAsyncThread()
 				syncData.odomInfo,
 				syncData.timeMsgConversion);
 		}
+		rtabmapMutex_.unlock();
 	}
 }
 
