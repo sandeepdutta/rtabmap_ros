@@ -529,7 +529,7 @@ private:
 	SyncData syncData_;
 	UMutex syncDataMutex_;
 	bool triggerNewMapBeforeNextUpdate_;
-
+	UMutex rtabmapMutex_;
 	DoubleBuffer<SyncData> syncDataBuffer_;
 	std::thread* processAsyncThread_;
 	bool processInThread_ {false};

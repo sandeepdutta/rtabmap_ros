@@ -925,8 +925,10 @@ CoreWrapper::CoreWrapper(const rclcpp::NodeOptions & options) :
 						rate_ = uStr2Float(parameters_.at(Parameters::kRtabmapDetectionRate()));
 						RCLCPP_INFO(this->get_logger(), "RTAB-Map rate detection = %f Hz", rate_);
 					}
+					rtabmapMutex_.lock();
 					rtabmap_.parseParameters(parameters_);
 					mapsManager_.setParameters(parameters_);
+					rtabmapMutex_.unlock();
 				}
 			};
 
@@ -1945,6 +1947,11 @@ void CoreWrapper::processAsyncThread()
 	{
 		SyncData syncData;
 		syncDataBuffer_.consume(syncData);
+		if(triggerNewMapBeforeNextUpdate_)
+		{
+			rtabmap_.triggerNewMap();
+			triggerNewMapBeforeNextUpdate_ = false;
+		}
 		if (syncData.valid)
 		{
 			process(syncData.stamp,
@@ -2954,6 +2961,7 @@ void CoreWrapper::updateRtabmapCallback(
 		const std::shared_ptr<std_srvs::srv::Empty::Request>,
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
+	rtabmapMutex_.lock();
 	for(rtabmap::ParametersMap::iterator iter=parameters_.begin(); iter!=parameters_.end(); ++iter)
 	{
 		std::string paramValue;
@@ -3001,6 +3009,7 @@ void CoreWrapper::updateRtabmapCallback(
 	}
 	rtabmap_.parseParameters(parameters_);
 	mapsManager_.setParameters(parameters_);
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::resetRtabmapCallback(
@@ -3009,6 +3018,7 @@ void CoreWrapper::resetRtabmapCallback(
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
 	RCLCPP_INFO(this->get_logger(), "rtabmap: Reset");
+	rtabmapMutex_.lock();
 	rtabmap_.resetMemory();
 
 	lastPoseMutex_.lock();
@@ -3042,6 +3052,7 @@ void CoreWrapper::resetRtabmapCallback(
 	mapToOdomMutex_.lock();
 	mapToOdom_.setIdentity();
 	mapToOdomMutex_.unlock();
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::pauseRtabmapCallback(
@@ -3049,6 +3060,7 @@ void CoreWrapper::pauseRtabmapCallback(
 		const std::shared_ptr<std_srvs::srv::Empty::Request>,
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
+	rtabmapMutex_.lock();
 	if(paused_)
 	{
 		RCLCPP_WARN(this->get_logger(), "rtabmap: Already paused!");
@@ -3059,6 +3071,7 @@ void CoreWrapper::pauseRtabmapCallback(
 		RCLCPP_INFO(this->get_logger(), "rtabmap: paused!");
 		set_parameter(rclcpp::Parameter("is_rtabmap_paused", true));
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::resumeRtabmapCallback(
@@ -3066,6 +3079,7 @@ void CoreWrapper::resumeRtabmapCallback(
 		const std::shared_ptr<std_srvs::srv::Empty::Request>,
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
+	rtabmapMutex_.lock();
 	if(!paused_)
 	{
 		RCLCPP_WARN(this->get_logger(), "rtabmap: Already running!");
@@ -3076,6 +3090,7 @@ void CoreWrapper::resumeRtabmapCallback(
 		RCLCPP_INFO(this->get_logger(), "rtabmap: resumed!");
 		set_parameter(rclcpp::Parameter("is_rtabmap_paused", false));
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::loadDatabaseCallback(
@@ -3091,7 +3106,6 @@ void CoreWrapper::loadDatabaseCallback(
 		RCLCPP_ERROR(get_logger(), "Directory %s doesn't exist! Cannot load database \"%s\"", newDatabasePath.c_str(), dir.c_str());
 		return;
 	}
-
 	if(UFile::exists(newDatabasePath) && req->clear)
 	{
 		UFile::erase(newDatabasePath);
@@ -3099,6 +3113,7 @@ void CoreWrapper::loadDatabaseCallback(
 
 	// Close old database
 	RCLCPP_INFO(get_logger(), "LoadDatabase: Saving current map (%s)...", databasePath_.c_str());
+	rtabmapMutex_.lock();
 	if(rtabmap_.getMemory())
 	{
 		// save the grid map
@@ -3112,7 +3127,7 @@ void CoreWrapper::loadDatabaseCallback(
 	}
 	rtabmap_.close();
 	RCLCPP_INFO(get_logger(), "LoadDatabase: Saving current map (%s, %ld MB)... done!", databasePath_.c_str(), UFile::length(databasePath_)/(1024*1024));
-
+	
 	lastPoseMutex_.lock();
 	lastPoseCovariance_ = cv::Mat();
 	lastPose_.setIdentity();
@@ -3217,6 +3232,7 @@ void CoreWrapper::loadDatabaseCallback(
 			RCLCPP_INFO(get_logger(), "LoadDatabase: Localization mode (%s=false)", Parameters::kMemIncrementalMemory().c_str());
 		}
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::triggerNewMapCallback(
@@ -3225,7 +3241,9 @@ void CoreWrapper::triggerNewMapCallback(
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
 	RCLCPP_INFO(this->get_logger(), "rtabmap: Trigger new map");
+	rtabmapMutex_.lock();
 	rtabmap_.triggerNewMap();
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::backupDatabaseCallback(
@@ -3234,6 +3252,7 @@ void CoreWrapper::backupDatabaseCallback(
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
 	RCLCPP_INFO(this->get_logger(), "Backup: Saving memory...");
+	rtabmapMutex_.lock();
 	if(rtabmap_.getMemory())
 	{
 		// save the grid map
@@ -3277,6 +3296,7 @@ void CoreWrapper::backupDatabaseCallback(
 	RCLCPP_INFO(this->get_logger(), "Backup: Reloading memory...");
 	rtabmap_.init(parameters_, databasePath_);
 	RCLCPP_INFO(this->get_logger(), "Backup: Reloading memory... done!");
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::republishMaps()
@@ -3362,6 +3382,7 @@ void CoreWrapper::detectMoreLoopClosuresCallback(
 			iterations,
 			intraSession?"true":"false",
 			interSession?"true":"false");
+	rtabmapMutex_.lock();
 	res->detected = rtabmap_.detectMoreLoopClosures(
 			clusterRadiusMax,
 			clusterAngle*M_PI/180.0,
@@ -3383,6 +3404,7 @@ void CoreWrapper::detectMoreLoopClosuresCallback(
 			republishMaps();
 		}
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::cleanupLocalGridsCallback(
@@ -3391,6 +3413,7 @@ void CoreWrapper::cleanupLocalGridsCallback(
 		std::shared_ptr<rtabmap_msgs::srv::CleanupLocalGrids::Response> res)
 {
 	RCLCPP_WARN(get_logger(), "Cleanup local grids service called");
+	rtabmapMutex_.lock();
 	UTimer timer;
 	int radius = 1;
 	bool filterScans = false;
@@ -3433,6 +3456,7 @@ void CoreWrapper::cleanupLocalGridsCallback(
 			republishMaps();
 		}
 	}
+	rtabmapMutex_.unlock();
 }
 void CoreWrapper::globalBundleAdjustmentCallback(
 		const std::shared_ptr<rmw_request_id_t>,
@@ -3468,6 +3492,7 @@ void CoreWrapper::globalBundleAdjustmentCallback(
 			iterations,
 			pixelVariance,
 			rematchFeatures?"true":"false");
+	rtabmapMutex_.lock();
 	bool success = rtabmap_.globalBundleAdjustment((Optimizer::Type)optimizer, rematchFeatures, iterations, pixelVariance);
 	if(!success)
 	{
@@ -3478,6 +3503,7 @@ void CoreWrapper::globalBundleAdjustmentCallback(
 		RCLCPP_WARN(get_logger(), "Post-Processing: Global Bundle Adjustment... done! (%fs)", timer.ticks());
 		republishMaps();
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::setModeLocalizationCallback(
@@ -3486,11 +3512,13 @@ void CoreWrapper::setModeLocalizationCallback(
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
 	RCLCPP_INFO(this->get_logger(), "rtabmap: Set localization mode");
+	rtabmapMutex_.lock();
 	rtabmap::ParametersMap parameters;
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kMemIncrementalMemory(), "false"));
 	set_parameter(rclcpp::Parameter(rtabmap::Parameters::kMemIncrementalMemory(), "false"));
 	rtabmap_.parseParameters(parameters);
 	RCLCPP_INFO(this->get_logger(), "rtabmap: Localization mode enabled!");
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::setModeMappingCallback(
@@ -3499,11 +3527,13 @@ void CoreWrapper::setModeMappingCallback(
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
 	RCLCPP_INFO(this->get_logger(), "rtabmap: Set mapping mode");
+	rtabmapMutex_.lock();
 	rtabmap::ParametersMap parameters;
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kMemIncrementalMemory(), "true"));
 	set_parameter(rclcpp::Parameter(rtabmap::Parameters::kMemIncrementalMemory(), "true"));
 	rtabmap_.parseParameters(parameters);
 	RCLCPP_INFO(this->get_logger(), "rtabmap: Mapping mode enabled!");
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::setLogDebug(
@@ -3550,7 +3580,7 @@ void CoreWrapper::getNodeDataCallback(
 			req->scan?"true":"false",
 			req->grid?"true":"false",
 			req->user_data?"true":"false");
-
+	rtabmapMutex_.lock();
 	if(req->ids.empty() && rtabmap_.getMemory() && rtabmap_.getMemory()->getLastWorkingSignature())
 	{
 		req->ids.push_back(rtabmap_.getMemory()->getLastWorkingSignature()->id());
@@ -3567,6 +3597,7 @@ void CoreWrapper::getNodeDataCallback(
 			res->data.push_back(msg);
 		}
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::getMapDataCallback(
@@ -3581,7 +3612,7 @@ void CoreWrapper::getMapDataCallback(
 	std::map<int, Signature> signatures;
 	std::map<int, Transform> poses;
 	std::multimap<int, rtabmap::Link> constraints;
-
+	rtabmapMutex_.lock();
 	rtabmap_.getGraph(
 			poses,
 			constraints,
@@ -3592,7 +3623,7 @@ void CoreWrapper::getMapDataCallback(
 			!req->graph_only,
 			!req->graph_only,
 			!req->graph_only);
-
+	rtabmapMutex_.unlock();
 	mapToOdomMutex_.lock();
 	Transform mapToOdomSafe = mapToOdom_.clone();
 	mapToOdomMutex_.unlock();
@@ -3627,7 +3658,7 @@ void CoreWrapper::getMapData2Callback(
 	std::map<int, Signature> signatures;
 	std::map<int, Transform> poses;
 	std::multimap<int, rtabmap::Link> constraints;
-
+	rtabmapMutex_.lock();
 	rtabmap_.getGraph(
 			poses,
 			constraints,
@@ -3640,7 +3671,7 @@ void CoreWrapper::getMapData2Callback(
 			req->with_grids,
 			req->with_words,
 			req->with_global_descriptors);
-
+	rtabmapMutex_.unlock();
 	mapToOdomMutex_.lock();
 	Transform mapToOdomSafe = mapToOdom_.clone();
 	mapToOdomMutex_.unlock();
@@ -3661,6 +3692,7 @@ void CoreWrapper::getMapCallback(
 		const std::shared_ptr<nav_msgs::srv::GetMap::Request>,
 		std::shared_ptr<nav_msgs::srv::GetMap::Response> res)
 {
+	rtabmapMutex_.lock();
 	// Make sure grid map cache is up to date (in case there is no subscriber on map topics)
 	std::map<int, Transform> poses = rtabmap_.getLocalOptimizedPoses();
 	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, false);
@@ -3696,6 +3728,7 @@ void CoreWrapper::getMapCallback(
 	{
 		RCLCPP_WARN(get_logger(), "rtabmap: The map is empty!");
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::getProbMapCallback(
@@ -3703,6 +3736,7 @@ void CoreWrapper::getProbMapCallback(
 		const std::shared_ptr<nav_msgs::srv::GetMap::Request>,
 		std::shared_ptr<nav_msgs::srv::GetMap::Response> res)
 {
+	rtabmapMutex_.lock();
 	// Make sure grid map cache is up to date (in case there is no subscriber on map topics)
 	std::map<int, Transform> poses = rtabmap_.getLocalOptimizedPoses();
 	mapsManager_.updateMapCaches(poses, rtabmap_.getMemory(), true, false);
@@ -3738,6 +3772,7 @@ void CoreWrapper::getProbMapCallback(
 	{
 		RCLCPP_WARN(get_logger(), "rtabmap: The map is empty!");
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::publishMapCallback(
@@ -3746,7 +3781,7 @@ void CoreWrapper::publishMapCallback(
 		std::shared_ptr<rtabmap_msgs::srv::PublishMap::Response>)
 {
 	RCLCPP_INFO(this->get_logger(), "rtabmap: Publishing map...");
-
+	rtabmapMutex_.lock();
 	rclcpp::Time stampNow = now();
 
 	if(mapDataPub_->get_subscription_count() ||
@@ -3990,6 +4025,7 @@ void CoreWrapper::publishMapCallback(
 			mapsManager_.publishMaps(std::map<int, Transform>(), stampNow, mapFrameId_);
 		}
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::getPlanCallback(
@@ -3997,6 +4033,7 @@ void CoreWrapper::getPlanCallback(
 		const std::shared_ptr<nav_msgs::srv::GetPlan::Request> req,
 		std::shared_ptr<nav_msgs::srv::GetPlan::Response> res)
 {
+	rtabmapMutex_.lock();
 	Transform pose = rtabmap_conversions::transformFromPoseMsg(req->goal.pose, true);
 	UTimer timer;
 	if(!pose.isNull())
@@ -4066,6 +4103,7 @@ void CoreWrapper::getPlanCallback(
 		}
 		rtabmap_.clearPath(0);
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::getPlanNodesCallback(
@@ -4073,6 +4111,7 @@ void CoreWrapper::getPlanNodesCallback(
 		const std::shared_ptr<rtabmap_msgs::srv::GetPlan::Request> req,
 		std::shared_ptr<rtabmap_msgs::srv::GetPlan::Response> res)
 {
+	rtabmapMutex_.lock();
 	Transform pose;
 	if(req->goal_node <= 0)
 	{
@@ -4164,6 +4203,7 @@ void CoreWrapper::getPlanNodesCallback(
 		}
 		rtabmap_.clearPath(0);
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::setGoalCallback(
@@ -4171,6 +4211,7 @@ void CoreWrapper::setGoalCallback(
 		const std::shared_ptr<rtabmap_msgs::srv::SetGoal::Request> req,
 		std::shared_ptr<rtabmap_msgs::srv::SetGoal::Response> res)
 {
+	rtabmapMutex_.lock();
 	double planningTime = 0.0;
 	goalCommonCallback(req->node_id, req->node_label, req->frame_id, Transform(), now(), &planningTime);
 	const std::vector<std::pair<int, Transform> > & path = rtabmap_.getPath();
@@ -4182,6 +4223,7 @@ void CoreWrapper::setGoalCallback(
 		res->path_ids[i] = path[i].first;
 		rtabmap_conversions::transformToPoseMsg(path[i].second, res->path_poses[i]);
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::cancelGoalCallback(
@@ -4189,6 +4231,7 @@ void CoreWrapper::cancelGoalCallback(
 		const std::shared_ptr<std_srvs::srv::Empty::Request>,
 		std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
+	rtabmapMutex_.lock();
 	if(rtabmap_.getPath().size())
 	{
 		RCLCPP_WARN(this->get_logger(), "Goal cancelled!");
@@ -4210,6 +4253,7 @@ void CoreWrapper::cancelGoalCallback(
 		nav2Client_->async_cancel_all_goals();
 	}
 #endif
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::setLabelCallback(
@@ -4217,6 +4261,7 @@ void CoreWrapper::setLabelCallback(
 		const std::shared_ptr<rtabmap_msgs::srv::SetLabel::Request> req,
 		std::shared_ptr<rtabmap_msgs::srv::SetLabel::Response>)
 {
+	rtabmapMutex_.lock();
 	if(rtabmap_.labelLocation(req->node_id, req->node_label))
 	{
 		if(req->node_id > 0)
@@ -4239,6 +4284,7 @@ void CoreWrapper::setLabelCallback(
 			RCLCPP_ERROR(this->get_logger(), "Could not set label \"%s\" to last node", req->node_label.c_str());
 		}
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::listLabelsCallback(
@@ -4246,6 +4292,7 @@ void CoreWrapper::listLabelsCallback(
 		const std::shared_ptr<rtabmap_msgs::srv::ListLabels::Request>,
 		std::shared_ptr<rtabmap_msgs::srv::ListLabels::Response> res)
 {
+	rtabmapMutex_.lock();
 	if(rtabmap_.getMemory())
 	{
 		std::map<int, std::string> labels = rtabmap_.getMemory()->getAllLabels();
@@ -4253,6 +4300,7 @@ void CoreWrapper::listLabelsCallback(
 		res->labels = uValues(labels);
 		RCLCPP_INFO(this->get_logger(), "List labels service: %d labels found.", (int)res->labels.size());
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::removeLabelCallback(
@@ -4260,6 +4308,7 @@ void CoreWrapper::removeLabelCallback(
 		const std::shared_ptr<rtabmap_msgs::srv::RemoveLabel::Request> req,
 		std::shared_ptr<rtabmap_msgs::srv::RemoveLabel::Response>)
 {
+	rtabmapMutex_.lock();
 	if(rtabmap_.getMemory())
 	{
 		int id = rtabmap_.getMemory()->getSignatureIdByLabel(req->label, true);
@@ -4276,17 +4325,20 @@ void CoreWrapper::removeLabelCallback(
 			RCLCPP_INFO(this->get_logger(), "Removed label \"%s\".", req->label.c_str());
 		}
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::addLinkCallback(const std::shared_ptr<rmw_request_id_t>,
 		const std::shared_ptr<rtabmap_msgs::srv::AddLink::Request> req,
 		std::shared_ptr<rtabmap_msgs::srv::AddLink::Response>)
 {
+	rtabmapMutex_.lock();
 	if(rtabmap_.getMemory())
 	{
 		RCLCPP_INFO(get_logger(), "Adding external link %d -> %d", req->link.from_id, req->link.to_id);
 		rtabmap_.addLink(rtabmap_conversions::linkFromROS(req->link));
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::getNodesInRadiusCallback(
@@ -4294,6 +4346,7 @@ void CoreWrapper::getNodesInRadiusCallback(
 		const std::shared_ptr<rtabmap_msgs::srv::GetNodesInRadius::Request> req,
 		std::shared_ptr<rtabmap_msgs::srv::GetNodesInRadius::Response> res)
 {
+	rtabmapMutex_.lock();
 	RCLCPP_INFO(get_logger(), "Get nodes in radius (%f): node_id=%d pose=(%f,%f,%f)", req->radius, req->node_id, req->x, req->y, req->z);
 	std::map<int, Transform> poses;
 	std::map<int, float> dists;
@@ -4321,6 +4374,7 @@ void CoreWrapper::getNodesInRadiusCallback(
 		res->dists_sqr[index] = dists.at(iter->first);
 		++index;
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::publishStats(const rclcpp::Time & stamp)
@@ -4871,6 +4925,7 @@ void CoreWrapper::octomapBinaryCallback(
 		std::shared_ptr<octomap_msgs::srv::GetOctomap::Response> res)
 {
 	RCLCPP_INFO(this->get_logger(), "Sending binary map data on service request");
+	rtabmapMutex_.lock();
 	res->map.header.frame_id = mapFrameId_;
 	res->map.header.stamp = now();
 
@@ -4887,6 +4942,7 @@ void CoreWrapper::octomapBinaryCallback(
 	{
 		octomap_msgs::binaryMapToMsg(*octomap->octree(), res->map);
 	}
+	rtabmapMutex_.unlock();
 }
 
 void CoreWrapper::octomapFullCallback(
@@ -4897,7 +4953,7 @@ void CoreWrapper::octomapFullCallback(
 	RCLCPP_INFO(this->get_logger(), "Sending full map data on service request");
 	res->map.header.frame_id = mapFrameId_;
 	res->map.header.stamp = now();
-
+	rtabmapMutex_.lock();
 	std::map<int, Transform> poses = rtabmap_.getLocalOptimizedPoses();
 	if((mappingMaxNodes_ > 0 || mappingAltitudeDelta_>0.0) && poses.size()>1)
 	{
@@ -4911,6 +4967,7 @@ void CoreWrapper::octomapFullCallback(
 	{
 		octomap_msgs::fullMapToMsg(*octomap->octree(), res->map);
 	}
+	rtabmapMutex_.unlock();
 }
 #endif
 #endif
