@@ -927,8 +927,10 @@ CoreWrapper::CoreWrapper(const rclcpp::NodeOptions & options) :
 					}
 					rtabmapMutex_.lock();
 					rtabmap_.parseParameters(parameters_);
-					mapsManager_.setParameters(parameters_);
-					rtabmapMutex_.unlock();
+					// Don't reset map in localization mode
+					if(rtabmap_.getMemory()->isIncremental()) {
+						mapsManager_.setParameters(parameters_);
+					}
 				}
 			};
 
@@ -3010,8 +3012,10 @@ void CoreWrapper::updateRtabmapCallback(
 		RCLCPP_INFO(get_logger(), "2D mapping = %s", twoDMapping_?"true":"false");
 	}
 	rtabmap_.parseParameters(parameters_);
-	mapsManager_.setParameters(parameters_);
-	rtabmapMutex_.unlock();
+	// Don't reset map in localization mode
+	if(rtabmap_.getMemory()->isIncremental()) {
+		mapsManager_.setParameters(parameters_);
+	}
 }
 
 void CoreWrapper::resetRtabmapCallback(
