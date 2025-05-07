@@ -110,57 +110,6 @@ class StereoDense;
 }
 
 namespace rtabmap_slam {
-template <typename T>
-class DoubleBuffer {
-private:
-    T buffer[2];  // Two slots for ping-pong buffering
-    std::atomic<int> write_index{0};
-    std::atomic<int> read_index{1};
-
-    std::mutex mtx;
-    std::condition_variable cv;
-    std::atomic<bool> new_data{false};
-
-public:
-	std::atomic<int> over_write_count{0};
-    DoubleBuffer() = default;
-
-    // Producer writes a single item to the write buffer
-    void produce(const T& data) {
-        buffer[write_index.load(std::memory_order_acquire)] = data;
-        new_data.store(true, std::memory_order_release);
-		over_write_count.fetch_add(1, std::memory_order_relaxed);
-        cv.notify_one();
-    }
-
-    // Consumer swaps indexes and reads a single item from the read buffer
-    void consume(T& data) {
-        std::unique_lock<std::mutex> lock(mtx);
-        cv.wait(lock, [this]() { return new_data.load(std::memory_order_acquire); });
-
-        // Atomic swap of indexes
-        int old_write = write_index.load(std::memory_order_relaxed);
-        int old_read = read_index.load(std::memory_order_relaxed);
-
-        bool swapped = false;
-        while (!swapped) {
-            swapped = read_index.compare_exchange_weak(
-                old_read, old_write,
-                std::memory_order_acq_rel
-            );
-        }
-        write_index.store(old_read, std::memory_order_release);
-
-        // Read from new read buffer
-        data = buffer[read_index.load(std::memory_order_acquire)];
-        new_data.store(false, std::memory_order_release);
-		resetOverWriteCount();
-    }
-
-	void resetOverWriteCount() {
-		over_write_count.store(0, std::memory_order_relaxed);
-	}
-};
 
 class CoreWrapper : public rclcpp::Node, public rtabmap_sync::CommonDataSubscriber
 {
