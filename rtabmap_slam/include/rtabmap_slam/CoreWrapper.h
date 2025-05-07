@@ -122,12 +122,14 @@ private:
     std::atomic<bool> new_data{false};
 
 public:
+	std::atomic<int> over_write_count{0};
     DoubleBuffer() = default;
 
     // Producer writes a single item to the write buffer
     void produce(const T& data) {
         buffer[write_index.load(std::memory_order_acquire)] = data;
         new_data.store(true, std::memory_order_release);
+		over_write_count.fetch_add(1, std::memory_order_relaxed);
         cv.notify_one();
     }
 
@@ -152,7 +154,12 @@ public:
         // Read from new read buffer
         data = buffer[read_index.load(std::memory_order_acquire)];
         new_data.store(false, std::memory_order_release);
+		resetOverWriteCount();
     }
+
+	void resetOverWriteCount() {
+		over_write_count.store(0, std::memory_order_relaxed);
+	}
 };
 
 class CoreWrapper : public rclcpp::Node, public rtabmap_sync::CommonDataSubscriber
