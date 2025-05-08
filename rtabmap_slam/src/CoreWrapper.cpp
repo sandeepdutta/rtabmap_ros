@@ -1949,6 +1949,34 @@ void CoreWrapper::processAsync()
 	syncTimer_->cancel();
 }
 
+void CoreWrapper::processAsyncThread()
+{
+	while (rclcpp::ok())
+	{
+		SyncData syncData;
+		syncDataBuffer_.consume(syncData);
+		rtabmapMutex_.lock();
+		if(triggerNewMapBeforeNextUpdate_)
+		{
+			rtabmap_.triggerNewMap();
+			triggerNewMapBeforeNextUpdate_ = false;
+		}
+		if (syncData.valid)
+		{
+			process(syncData.stamp,
+				syncData.data,
+				syncData.odom,
+				syncData.odomVelocity,
+				syncData.odomFrameId,
+				syncData.odomCovariance,
+				syncData.odomInfo,
+				syncData.timeMsgConversion);
+		}
+		syncDataBuffer_.resetOverWriteCount();
+		rtabmapMutex_.unlock();
+	}
+}
+
 void CoreWrapper::process(
 		const rclcpp::Time & stamp,
 		SensorData & data,
