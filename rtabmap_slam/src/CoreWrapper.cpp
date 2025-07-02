@@ -1071,7 +1071,8 @@ void CoreWrapper::defaultCallback(const sensor_msgs::msg::Image::ConstSharedPtr 
 					 "when you need to have IDs output of RTAB-map synchronised with the source "
 					 "image sequence ID.");
 		}
-		RCLCPP_INFO(this->get_logger(), "rtabmap: Update rate=%fs, Limit=%fs, Processing time = %fs (%d local nodes)",
+		// Use RCLCPP_INFO_THROTTLE every 10 seconds
+		RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, "rtabmap: Update rate=%fs, Limit=%fs, Processing time = %fs (%d local nodes)",
 				1.0f/rate_,
 				rtabmap_.getTimeThreshold()/1000.0f,
 				timer.ticks(),
@@ -1308,29 +1309,33 @@ void CoreWrapper::commonMultiCameraCallback(
 
 	if(syncTimer_->is_canceled() && syncDataMutex_.lockTry() == 0)
 	{
-		UScopeMutex lock(lastPoseMutex_);
-		commonMultiCameraCallbackImpl(odomFrameId,
-				userDataMsg,
-				imageMsgs,
-				depthMsgs,
-				cameraInfoMsgs,
-				depthCameraInfoMsgs,
-				scan2dMsg,
-				scan3dMsg,
-				odomInfoMsg,
-				globalDescriptorMsgs,
-				localKeyPoints,
-				localPoints3d,
-				localDescriptors);
-		
-		if(syncData_.valid) {
-			if (processInThread_) {
-				syncDataBuffer_.produce(syncData_);
-			} else {
-				syncTimer_->reset();
+		try {
+			UScopeMutex lock(lastPoseMutex_);
+			commonMultiCameraCallbackImpl(odomFrameId,
+					userDataMsg,
+					imageMsgs,
+					depthMsgs,
+					cameraInfoMsgs,
+					depthCameraInfoMsgs,
+					scan2dMsg,
+					scan3dMsg,
+					odomInfoMsg,
+					globalDescriptorMsgs,
+					localKeyPoints,
+					localPoints3d,
+					localDescriptors);
+			
+			if(syncData_.valid) {
+				if (processInThread_) {
+					syncDataBuffer_.produce(syncData_);
+				} else {
+					syncTimer_->reset();
+				}
 			}
+			syncDataMutex_.unlock();
+		} catch (const std::exception& e) {
+			RCLCPP_ERROR(this->get_logger(), "Error processing sync data: %s", e.what());
 		}
-		syncDataMutex_.unlock();
 	}
 }
 
@@ -1963,14 +1968,18 @@ void CoreWrapper::processAsyncThread()
 		}
 		if (syncData.valid)
 		{
-			process(syncData.stamp,
-				syncData.data,
-				syncData.odom,
-				syncData.odomVelocity,
-				syncData.odomFrameId,
-				syncData.odomCovariance,
-				syncData.odomInfo,
-				syncData.timeMsgConversion);
+			try {
+				process(syncData.stamp,
+					syncData.data,
+					syncData.odom,
+					syncData.odomVelocity,
+					syncData.odomFrameId,
+					syncData.odomCovariance,
+					syncData.odomInfo,
+					syncData.timeMsgConversion);
+			} catch (const std::exception& e) {
+				RCLCPP_ERROR(this->get_logger(), "Error processing sync data: %s", e.what());
+			}
 		}
 		syncDataBuffer_.resetOverWriteCount();
 		rtabmapMutex_.unlock();
@@ -2520,7 +2529,7 @@ void CoreWrapper::process(
 		{
 			timeRtabmap = timer.ticks();
 		}
-		RCLCPP_INFO(this->get_logger(), "rtabmap (%d): Rate=%.2fs, Limit=%.3fs, Conversion=%.4fs, RTAB-Map=%.4fs, Maps update=%.4fs pub=%.4fs delay=%.4fs (local map=%d, WM=%d) over_write_count=%d",
+		RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, "rtabmap (%d): Rate=%.2fs, Limit=%.3fs, Conversion=%.4fs, RTAB-Map=%.4fs, Maps update=%.4fs pub=%.4fs delay=%.4fs (local map=%d, WM=%d) over_write_count=%d",
 				rtabmap_.getLastLocationId(),
 				rate_>0?1.0f/rate_:0,
 				rtabmap_.getTimeThreshold()/1000.0f,
