@@ -1336,29 +1336,33 @@ void CoreWrapper::commonMultiCameraCallback(
 
 	if(syncTimer_->is_canceled() && syncDataMutex_.lockTry() == 0)
 	{
-		UScopeMutex lock(lastPoseMutex_);
-		commonMultiCameraCallbackImpl(odomFrameId,
-				userDataMsg,
-				imageMsgs,
-				depthMsgs,
-				cameraInfoMsgs,
-				depthCameraInfoMsgs,
-				scan2dMsg,
-				scan3dMsg,
-				odomInfoMsg,
-				globalDescriptorMsgs,
-				localKeyPoints,
-				localPoints3d,
-				localDescriptors);
-		
-		if(syncData_.valid) {
-			if (processInThread_) {
-				syncDataBuffer_.produce(syncData_);
-			} else {
-				syncTimer_->reset();
+		try {
+			UScopeMutex lock(lastPoseMutex_);
+			commonMultiCameraCallbackImpl(odomFrameId,
+					userDataMsg,
+					imageMsgs,
+					depthMsgs,
+					cameraInfoMsgs,
+					depthCameraInfoMsgs,
+					scan2dMsg,
+					scan3dMsg,
+					odomInfoMsg,
+					globalDescriptorMsgs,
+					localKeyPoints,
+					localPoints3d,
+					localDescriptors);
+			
+			if(syncData_.valid) {
+				if (processInThread_) {
+					syncDataBuffer_.produce(syncData_);
+				} else {
+					syncTimer_->reset();
+				}
 			}
+			syncDataMutex_.unlock();
+		} catch (const std::exception& e) {
+			RCLCPP_ERROR(this->get_logger(), "Error processing sync data: %s", e.what());
 		}
-		syncDataMutex_.unlock();
 	}
 }
 
@@ -1991,14 +1995,18 @@ void CoreWrapper::processAsyncThread()
 		}
 		if (syncData.valid)
 		{
-			process(syncData.stamp,
-				syncData.data,
-				syncData.odom,
-				syncData.odomVelocity,
-				syncData.odomFrameId,
-				syncData.odomCovariance,
-				syncData.odomInfo,
-				syncData.timeMsgConversion);
+			try {
+				process(syncData.stamp,
+					syncData.data,
+					syncData.odom,
+					syncData.odomVelocity,
+					syncData.odomFrameId,
+					syncData.odomCovariance,
+					syncData.odomInfo,
+					syncData.timeMsgConversion);
+			} catch (const std::exception& e) {
+				RCLCPP_ERROR(this->get_logger(), "Error processing sync data: %s", e.what());
+			}
 		}
 		syncDataBuffer_.resetOverWriteCount();
 		rtabmapMutex_.unlock();
