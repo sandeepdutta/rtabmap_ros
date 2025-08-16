@@ -2730,8 +2730,7 @@ void CoreWrapper::apriltagAsyncCallback(const apriltag_msgs::msg::AprilTagDetect
 				waitForTransform_);
 			if(camToTag.isNull())
 			{
-				RCLCPP_WARN(get_logger(), "Could not get TF between %s and %s frames for tag detection %d.",
-					tagDetections->header.frame_id.c_str(),
+				RCLCPP_WARN(get_logger(), "Could not get TF for %s frame for tag detection %d.",
 					tagFrameId.c_str(),
 					msg->detections[i].id);
 					continue;
