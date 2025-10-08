@@ -392,6 +392,7 @@ private:
 	double landmarkDefaultAngVariance_;
 	double landmarkDefaultLinVariance_;
 	double waitForTransform_;
+	double stalenessFactor_;
 	bool useActionForGoal_;
 	bool useSavedMap_;
 	bool genScan_;
