@@ -18,7 +18,6 @@ find_package(ament_cmake_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(QT NAMES Qt5 QUIET COMPONENTS Widgets)
 find_package(rviz_common REQUIRED)
 find_package(rviz_rendering REQUIRED)
 find_package(rviz_default_plugins REQUIRED)
@@ -45,6 +44,9 @@ SET(Libraries
   rtabmap_conversions
   rtabmap_msgs
 )
+
+MESSAGE(STATUS "rtabmap_conversions=${rtabmap_conversions_LIBRARIES}")
+
 
 ###########
 ## Build ##
