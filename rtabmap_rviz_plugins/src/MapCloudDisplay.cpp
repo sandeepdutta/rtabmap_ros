@@ -47,6 +47,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rviz_common/properties/vector_property.hpp"
 
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/io/pcd_io.h>
 
 #include <rtabmap/core/Transform.h>
 #include <rtabmap/core/util3d_transforms.h>
@@ -201,6 +202,10 @@ MapCloudDisplay::MapCloudDisplay()
 	download_graph_ = new rviz_common::properties::BoolProperty( "Download graph", false,
 											 "Download the optimized global graph (without cloud data) using rtabmap/GetMap service.",
 											 this, SLOT( downloadGraph() ), this );
+
+	download_save_to_file_ = new rviz_common::properties::BoolProperty( "Save Downloaded map to file", false,
+											 "When enabled with Download map, save the assembled point cloud to a PCD file.",
+											 this, SLOT( ), this );
 }
 
 
@@ -274,6 +279,16 @@ void MapCloudDisplay::processMapData(const rtabmap_msgs::msg::MapData& map)
 	// Add new clouds...
 	bool fromDepth = !cloud_from_scan_->getBool();
 	std::set<int> nodeDataReceived;
+
+	// Initialize assembled cloud for saving if both flags are enabled
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr assembledCloud;
+	bool shouldSaveToFile = download_save_to_file_->getBool() && download_map_->getBool();
+	if(shouldSaveToFile)
+	{
+		assembledCloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+		RVIZ_COMMON_LOG_INFO("Assembling point cloud for saving to file...");
+	}
+
 	for(unsigned int i=0; i<map.nodes.size() && i<map.nodes.size(); ++i)
 	{
 		int id = map.nodes[i].id;
@@ -311,6 +326,19 @@ void MapCloudDisplay::processMapData(const rtabmap_msgs::msg::MapData& map)
 						cloud = rtabmap::util3d::voxelize(cloud, validIndices, cloud_voxel_size_->getFloat());
 					}
 
+					// For saving: store cloud in world frame before floor/ceiling filtering
+					pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudForSaving;
+					if(shouldSaveToFile && !cloud->empty())
+					{
+						// Get pose for this node
+						auto poseIt = poses.find(id);
+						if(poseIt != poses.end())
+						{
+							cloudForSaving.reset(new pcl::PointCloud<pcl::PointXYZRGB>(*cloud));
+							cloudForSaving = rtabmap::util3d::transformPointCloud(cloudForSaving, poseIt->second);
+						}
+					}
+
 					if(cloud_filter_floor_height_->getFloat() != 0.0f || cloud_filter_ceiling_height_->getFloat() != 0.0f)
 					{
 						// convert in /odom frame
@@ -318,9 +346,28 @@ void MapCloudDisplay::processMapData(const rtabmap_msgs::msg::MapData& map)
 						cloud = rtabmap::util3d::passThrough(cloud, "z",
 								cloud_filter_floor_height_->getFloat()!=0.0f?cloud_filter_floor_height_->getFloat():-999.0f,
 								cloud_filter_ceiling_height_->getFloat()!=0.0f && (cloud_filter_floor_height_->getFloat()==0.0f || cloud_filter_ceiling_height_->getFloat()>cloud_filter_floor_height_->getFloat())?cloud_filter_ceiling_height_->getFloat():999.0f);
+
+						// Apply same filtering to cloud for saving
+						if(shouldSaveToFile && cloudForSaving && !cloudForSaving->empty())
+						{
+							cloudForSaving = rtabmap::util3d::passThrough(cloudForSaving, "z",
+									cloud_filter_floor_height_->getFloat()!=0.0f?cloud_filter_floor_height_->getFloat():-999.0f,
+									cloud_filter_ceiling_height_->getFloat()!=0.0f && (cloud_filter_floor_height_->getFloat()==0.0f || cloud_filter_ceiling_height_->getFloat()>cloud_filter_floor_height_->getFloat())?cloud_filter_ceiling_height_->getFloat():999.0f);
+						}
+
 						// convert back in /base_link frame
 						if(!cloud->empty())
 							cloud = rtabmap::util3d::transformPointCloud(cloud, s.getPose().inverse());
+					}
+					else if(shouldSaveToFile && cloudForSaving && !cloudForSaving->empty())
+					{
+						// No floor/ceiling filter, cloudForSaving already in world frame
+					}
+
+					// Add to assembled cloud
+					if(shouldSaveToFile && cloudForSaving && !cloudForSaving->empty())
+					{
+						*assembledCloud += *cloudForSaving;
 					}
 
 					if(!cloud->empty())
@@ -388,6 +435,24 @@ void MapCloudDisplay::processMapData(const rtabmap_msgs::msg::MapData& map)
 		current_map_ = poses;
 		current_map_updated_ = true;
 		nodeDataReceived_.insert(nodeDataReceived.begin(), nodeDataReceived.end());
+	}
+
+	// Save assembled point cloud to file if both flags are enabled
+	if(shouldSaveToFile && assembledCloud && !assembledCloud->empty())
+	{
+		std::string filename = "rtabmap_cloud_" + std::to_string(rclcpp::Clock().now().seconds()) + ".pcd";
+		if(pcl::io::savePCDFileBinary(filename, *assembledCloud) == 0)
+		{
+			RVIZ_COMMON_LOG_INFO(uFormat("Point cloud saved to %s (%d points)", filename.c_str(), (int)assembledCloud->size()));
+		}
+		else
+		{
+			RVIZ_COMMON_LOG_ERROR(uFormat("Failed to save point cloud to %s", filename.c_str()));
+		}
+	}
+	else if(shouldSaveToFile)
+	{
+		RVIZ_COMMON_LOG_WARNING("Assembled point cloud is empty, nothing to save");
 	}
 }
 

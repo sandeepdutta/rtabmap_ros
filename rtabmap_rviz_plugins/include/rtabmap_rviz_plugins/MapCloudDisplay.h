@@ -130,6 +130,7 @@ public:
 	rviz_common::properties::StringProperty* download_namespace;
 	rviz_common::properties::BoolProperty* download_map_;
 	rviz_common::properties::BoolProperty* download_graph_;
+	rviz_common::properties::BoolProperty* download_save_to_file_;
 
 public Q_SLOTS:
 	void causeRetransform();
